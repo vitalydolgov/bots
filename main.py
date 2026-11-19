@@ -15,6 +15,7 @@ from tools.read_image import READ_IMAGE_TOOLS
 from mistralai import agents
 from mistralai.vibe.harness.runtime.completion.providers.openai import OpenAICompletionConfig
 from skills import seed_skills
+from roster import roster_instructions
 
 seed_skills()
 
@@ -46,7 +47,7 @@ def modality_instructions(modalities: list[str]) -> str:
 
 BOT_NAME = PROFILE or "bot"
 modalities = CONFIG.input_modalities or detect_input_modalities(CONFIG.base_url, CONFIG.model, CONFIG.api_key_env_var)
-instructions = "\n\n".join(part for part in (identity_instructions(BOT_NAME), modality_instructions(modalities), date_instructions(), memory_instructions()) if part)
+instructions = "\n\n".join(part for part in (identity_instructions(BOT_NAME), modality_instructions(modalities), date_instructions(), roster_instructions(), memory_instructions()) if part)
 
 agent = agents.Agent(
     name=BOT_NAME,
