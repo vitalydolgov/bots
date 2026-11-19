@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from config import CONFIG, PROFILE, WORKSPACE_DIR
+from config import BOT_DIR, BOT_ROOT, CONFIG, PROFILE, WORKSPACE_DIR
 from mcp_servers import load_mcps
 from modalities import detect_input_modalities
 from tools.memory import MEMORY_TOOLS, memory_instructions
@@ -26,14 +26,22 @@ subprocess.run(["bash", str(CHROME_SCRIPT), str(WORKSPACE_DIR)], check=False, ti
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "instructions" / "prompts"
 MODALITY_PROMPTS = {"image": PROMPTS_DIR / "vision.md"}
+IDENTITY_PATH = (BOT_DIR or BOT_ROOT) / "IDENTITY.md"
 
 
 def date_instructions() -> str:
     return (PROMPTS_DIR / "date.md").read_text(encoding="utf-8").strip()
 
 
-def identity_instructions(name: str) -> str:
-    return (PROMPTS_DIR / "identity.md").read_text(encoding="utf-8").strip().format(name=name)
+def identity_instructions(identifier: str) -> str:
+    built_in = (PROMPTS_DIR / "identity.md").read_text(encoding="utf-8").strip().format(identifier=identifier)
+    try:
+        user_identity = IDENTITY_PATH.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return built_in
+    if not user_identity:
+        return built_in
+    return f"{built_in}\n\n{user_identity}"
 
 
 def modality_instructions(modalities: list[str]) -> str:
