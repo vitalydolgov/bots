@@ -31,6 +31,10 @@ def date_instructions() -> str:
     return (PROMPTS_DIR / "date.md").read_text(encoding="utf-8").strip()
 
 
+def identity_instructions(name: str) -> str:
+    return (PROMPTS_DIR / "identity.md").read_text(encoding="utf-8").strip().format(name=name)
+
+
 def modality_instructions(modalities: list[str]) -> str:
     parts = []
     for modality in modalities:
@@ -40,11 +44,12 @@ def modality_instructions(modalities: list[str]) -> str:
     return "\n\n".join(parts)
 
 
+BOT_NAME = PROFILE or "bot"
 modalities = CONFIG.input_modalities or detect_input_modalities(CONFIG.base_url, CONFIG.model, CONFIG.api_key_env_var)
-instructions = "\n\n".join(part for part in (modality_instructions(modalities), date_instructions(), memory_instructions()) if part)
+instructions = "\n\n".join(part for part in (identity_instructions(BOT_NAME), modality_instructions(modalities), date_instructions(), memory_instructions()) if part)
 
 agent = agents.Agent(
-    name=PROFILE or "bot",
+    name=BOT_NAME,
     model=CONFIG.model,
     instructions=instructions,
     tools=[*MEMORY_TOOLS, *READ_IMAGE_TOOLS, *DATE_TOOLS],
