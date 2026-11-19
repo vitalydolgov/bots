@@ -81,13 +81,12 @@ Session persists remotely — the agent is registered in your Mistral workspace 
 uv run agents serve
 ```
 
-### Local WebUI
+### Local web client
 
-Local web client with persistence — experimental. Like Remote, but without Mistral. Run the worker in one terminal and the web client in another:
+Local web client with persistence — experimental. Like Remote, but without Mistral. One command serves the agent and its web client:
 
 ```sh
 uv run local-agents serve
-uv run local-agents webui
 ```
 
 See [docs/local_agents.md](docs/local_agents.md) for details.

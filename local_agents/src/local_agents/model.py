@@ -10,7 +10,6 @@ from .store import (
     find_session,
     get_agent,
     is_turn_running,
-    latest_session,
     read_events,
     session_sdk_id,
 )
@@ -31,7 +30,7 @@ class ChatModel:
         self._connect = connect_fn
 
     @classmethod
-    def load(cls, agent_name: str, new: bool = False, resume_ref: str | None = None, connect_fn: ConnectFn = connect) -> "ChatModel":
+    def load(cls, agent_name: str, resume_ref: str | None = None, connect_fn: ConnectFn = connect) -> "ChatModel":
         conn = connect_fn()
         try:
             if get_agent(conn, agent_name) is None:
@@ -47,12 +46,6 @@ class ChatModel:
                 session_id = row["id"]
                 enqueue(conn, session_id, "resume", {})
                 resumed = True
-            elif not new:
-                row = latest_session(conn, agent_name)
-                if row is not None:
-                    session_id = row["id"]
-                    enqueue(conn, session_id, "resume", {})
-                    resumed = True
             if session_id is None:
                 session_id = create_session(conn, agent_name)
         finally:
@@ -106,23 +99,5 @@ class ChatModel:
         conn = self._connect()
         try:
             enqueue(conn, session_id, "cancel", {})
-        finally:
-            conn.close()
-
-    def new_session(self) -> str:
-        with self.lock:
-            old_session_id = self.session_id
-            conn = self._connect()
-            try:
-                enqueue(conn, old_session_id, "detach", {})
-                self.session_id = create_session(conn, self.agent)
-                return self.session_id
-            finally:
-                conn.close()
-
-    def detach(self) -> None:
-        conn = self._connect()
-        try:
-            enqueue(conn, self.current_session_id(), "detach", {})
         finally:
             conn.close()

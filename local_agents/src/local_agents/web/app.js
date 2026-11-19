@@ -2,7 +2,6 @@ const log = document.getElementById('log');
 const meta = document.getElementById('meta');
 const input = document.getElementById('input');
 const form = document.getElementById('composer');
-const newSession = document.getElementById('new-session');
 const stop = document.getElementById('stop');
 let after = 0;
 let assistantBubble = null;
@@ -178,16 +177,6 @@ form.addEventListener('submit', async (e) => {
 
 stop.addEventListener('click', async () => {
   await fetch('/api/cancel', {method: 'POST'});
-});
-
-newSession.addEventListener('click', async () => {
-  await fetch('/api/new', {method: 'POST'});
-  log.innerHTML = '';
-  after = 0;
-  assistantBubble = null;
-  assistantRaw = '';
-  setBusy(false);
-  await refreshSession();
 });
 
 refreshSession().then(poll);

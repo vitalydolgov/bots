@@ -1,12 +1,13 @@
 import json
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .model import ChatModel, SessionLoadError
+from .model import ChatModel
 
-WEBUI_DIR = Path(__file__).parent / "webui"
-WEBUI_FILES = {
+WEB_DIR = Path(__file__).parent / "web"
+WEB_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "application/javascript; charset=utf-8"),
@@ -35,9 +36,9 @@ def make_handler(model: ChatModel):
 
         def do_GET(self):
             parsed = urlparse(self.path)
-            if parsed.path in WEBUI_FILES:
-                name, content_type = WEBUI_FILES[parsed.path]
-                body = (WEBUI_DIR / name).read_bytes()
+            if parsed.path in WEB_FILES:
+                name, content_type = WEB_FILES[parsed.path]
+                body = (WEB_DIR / name).read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(body)))
@@ -64,34 +65,13 @@ def make_handler(model: ChatModel):
             elif parsed.path == "/api/cancel":
                 model.cancel()
                 self.send_json({"ok": True})
-            elif parsed.path == "/api/new":
-                session_id = model.new_session()
-                self.send_json({"session_id": session_id})
             else:
                 self.send_json({"error": "not found"}, 404)
 
     return Handler
 
 
-def webui(agent_name: str, port: int, new: bool, resume_ref: str | None) -> int:
-    try:
-        model = ChatModel.load(agent_name, new=new, resume_ref=resume_ref)
-    except SessionLoadError as e:
-        print(e)
-        return 1
-
-    try:
-        server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(model))
-        shown = model.session_info()["sdk_id"] or model.current_session_id()
-        where = f"Resuming session {shown}" if model.resumed else f"Talking to {agent_name} (session {shown})"
-        print(f"{where}.")
-        print(f"Serving the webui at http://127.0.0.1:{port}/ — Ctrl+C to stop.")
-        try:
-            server.serve_forever()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            server.server_close()
-    finally:
-        model.detach()
-    return 0
+def start_server(model: ChatModel, port: int) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(model))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server

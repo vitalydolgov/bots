@@ -80,13 +80,6 @@ def find_session(conn: sqlite3.Connection, ref: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
-def latest_session(conn: sqlite3.Connection, agent: str) -> sqlite3.Row | None:
-    return conn.execute(
-        "SELECT * FROM sessions WHERE agent = ? AND sdk_id IS NOT NULL ORDER BY created_at DESC LIMIT 1",
-        (agent,),
-    ).fetchone()
-
-
 def set_session_status(conn: sqlite3.Connection, session_id: str, status: str) -> None:
     conn.execute("UPDATE sessions SET status = ? WHERE id = ?", (status, session_id))
 
@@ -150,19 +143,6 @@ def is_turn_running(conn: sqlite3.Connection, session_id: str) -> bool:
         (session_id,),
     ).fetchone()
     return row is not None
-
-
-def last_event_id(conn: sqlite3.Connection, session_id: str) -> int:
-    row = conn.execute(
-        "SELECT COALESCE(MAX(id), 0) AS last FROM events WHERE session_id = ?", (session_id,)
-    ).fetchone()
-    return row["last"]
-
-
-def delete_session(conn: sqlite3.Connection, session_id: str) -> None:
-    conn.execute("DELETE FROM events WHERE session_id = ?", (session_id,))
-    conn.execute("DELETE FROM commands WHERE session_id = ?", (session_id,))
-    conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
 
 
 def read_events(conn: sqlite3.Connection, session_id: str, after_id: int) -> list[sqlite3.Row]:

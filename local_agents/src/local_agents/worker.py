@@ -2,11 +2,11 @@ import asyncio
 import contextlib
 import json
 import os
-import re
 import sqlite3
 import sys
 from pathlib import Path
 
+from .model import ChatModel, SessionLoadError
 from .store import (
     BOT_DIR,
     DB_PATH,
@@ -18,26 +18,9 @@ from .store import (
     register_agent,
     set_session_status,
 )
+from .web import start_server
 
 POLL_SECONDS = 0.5
-PROFILE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
-
-
-def discover_profiles() -> list[str | None]:
-    bots = BOT_DIR
-    profiles: list[str | None] = []
-    if (bots / "config.toml").is_file():
-        profiles.append(None)
-    profiles_dir = bots / "profiles"
-    if profiles_dir.is_dir():
-        for child in sorted(profiles_dir.iterdir()):
-            if not child.is_dir() or not (child / "config.toml").is_file():
-                continue
-            if not PROFILE_PATTERN.fullmatch(child.name):
-                print(f"Skipping {child.name}: not a valid profile name", flush=True)
-                continue
-            profiles.append(child.name)
-    return profiles
 
 
 def _purge_project_modules(project: Path) -> None:
@@ -103,11 +86,6 @@ class StoreOutput:
         self._emit("turn_cancelled", reason or "")
 
 
-def _session_agent(conn: sqlite3.Connection, session_id: str) -> str | None:
-    row = conn.execute("SELECT agent FROM sessions WHERE id = ?", (session_id,)).fetchone()
-    return row["agent"] if row else None
-
-
 async def _ensure_client(
     conn: sqlite3.Connection,
     loaded: object,
@@ -134,9 +112,21 @@ async def _ensure_client(
     return client
 
 
+async def _detach_session(
+    conn: sqlite3.Connection,
+    sessions: dict[str, object],
+    session_id: str,
+) -> None:
+    client = sessions.pop(session_id, None)
+    if client is not None:
+        await client.close()
+    set_session_status(conn, session_id, "idle")
+    append_event(conn, session_id, "session_detached", "")
+
+
 async def handle_command(
     conn: sqlite3.Connection,
-    loaded_by_agent: dict[str, object],
+    loaded: object,
     sessions: dict[str, object],
     command: sqlite3.Row,
 ) -> None:
@@ -144,11 +134,7 @@ async def handle_command(
 
     session_id = command["session_id"]
     payload = json.loads(command["payload"])
-    agent_name = _session_agent(conn, session_id)
-    loaded = loaded_by_agent.get(agent_name or "")
     try:
-        if loaded is None:
-            raise RuntimeError(f"agent {agent_name!r} is not being served")
         if command["kind"] == "start":
             client = await loaded.agent._create_session()
             sessions[session_id] = client
@@ -173,11 +159,7 @@ async def handle_command(
                 raise
             append_event(conn, session_id, "turn_done", "completed" if completed else "failed")
         elif command["kind"] == "detach":
-            client = sessions.pop(session_id, None)
-            if client is not None:
-                await client.close()
-            set_session_status(conn, session_id, "idle")
-            append_event(conn, session_id, "session_detached", "")
+            await _detach_session(conn, sessions, session_id)
         else:
             raise RuntimeError(f"unknown command kind {command['kind']!r}")
         finish_command(conn, command["id"], "done")
@@ -186,48 +168,47 @@ async def handle_command(
         finish_command(conn, command["id"], "failed")
 
 
-async def serve(project: Path, profile: str | None) -> None:
+async def serve(project: Path, profile: str | None, port: int, resume_ref: str | None) -> None:
     from mistralai import agents
     from mistralai.agents import experimental
 
-    env_profile = os.environ.get("BOT_PROFILE", "").strip() or None
-    if profile is not None:
-        selected = [profile]
-    elif env_profile is not None:
-        selected = [env_profile]
-    else:
-        selected = discover_profiles()
-        if not selected:
-            raise SystemExit(
-                f"No profiles found in {BOT_DIR}: "
-                f"add a config.toml to {BOT_DIR}/config.toml or {BOT_DIR}/profiles/<profile>/"
-            )
+    selected = profile
+    if selected is None and not (BOT_DIR / "config.toml").is_file():
+        raise SystemExit(f"No common config at {BOT_DIR / 'config.toml'}: add one or pass --profile <name>.")
 
     original_profile = os.environ.get("BOT_PROFILE")
-    loaded_by_agent: dict[str, object] = {}
     conn = connect()
     try:
-        for prof in selected:
-            try:
-                loaded = _load_profile(project, prof)
-            except Exception as exc:
-                print(f"Skipping {prof or 'bot'}: {exc}", flush=True)
-                continue
-            agent_name = loaded.name
-            if agent_name in loaded_by_agent:
-                print(f"Skipping {prof or 'bot'}: agent name {agent_name!r} is already served", flush=True)
-                continue
-            register_agent(conn, agent_name, project.resolve())
-            loaded_by_agent[agent_name] = loaded
-            print(f"Serving {agent_name} from {project.resolve()}", flush=True)
+        try:
+            loaded = _load_profile(project, selected)
+        except Exception as exc:
+            raise SystemExit(f"Could not load {selected or 'bot'}: {exc}")
+        agent_name = loaded.name
+        register_agent(conn, agent_name, project.resolve())
+        print(f"Serving {agent_name} from {project.resolve()}", flush=True)
     finally:
         if original_profile is None:
             os.environ.pop("BOT_PROFILE", None)
         else:
             os.environ["BOT_PROFILE"] = original_profile
-    if not loaded_by_agent:
-        raise SystemExit("No agents could be loaded.")
 
+    try:
+        model = ChatModel.load(agent_name, resume_ref=resume_ref)
+    except SessionLoadError as exc:
+        raise SystemExit(str(exc))
+
+    try:
+        server = start_server(model, port)
+    except OSError as exc:
+        raise SystemExit(f"Could not listen on port {port}: {exc}")
+    shown = model.session_info()["sdk_id"] or model.current_session_id()
+    if model.resumed:
+        print(f"Resuming session {shown}.", flush=True)
+    else:
+        print(f"Started session {shown}.", flush=True)
+    print(f"Serving the web client at http://127.0.0.1:{port}/ — Ctrl+C to stop.", flush=True)
+
+    agent_names = [agent_name]
     sessions: dict[str, object] = {}
     turn_task: asyncio.Task | None = None
     turn_session_id: str | None = None
@@ -236,71 +217,73 @@ async def serve(project: Path, profile: str | None) -> None:
         async with agents.local_runtime(
             journal_factory=experimental.JsonFileSessionJournal.in_directory(JOURNAL_DIR)
         ):
-            while True:
-                if turn_task is not None and turn_task.done():
-                    if not turn_task.cancelled() and (exc := turn_task.exception()) is not None:
-                        print(f"Turn failed: {exc}", flush=True)
-                    turn_task = None
-                    turn_session_id = None
-                busy = turn_task is not None
-                if busy:
-                    command = claim_command(conn, list(loaded_by_agent), only_kinds=["cancel"])
-                    if command is None:
-                        command = claim_command(conn, list(loaded_by_agent), only_kinds=["message"], session_id=turn_session_id)
-                else:
-                    command = claim_command(conn, list(loaded_by_agent))
-                if command is None:
-                    await asyncio.sleep(POLL_SECONDS)
-                    continue
-                if command["kind"] == "cancel":
-                    if busy and command["session_id"] == turn_session_id:
-                        turn_task.cancel()
-                        try:
-                            await turn_task
-                        except asyncio.CancelledError:
-                            pass
+            try:
+                while True:
+                    if turn_task is not None and turn_task.done():
+                        if not turn_task.cancelled() and (exc := turn_task.exception()) is not None:
+                            print(f"Turn failed: {exc}", flush=True)
                         turn_task = None
                         turn_session_id = None
+                    busy = turn_task is not None
+                    if busy:
+                        command = claim_command(conn, agent_names, only_kinds=["cancel"])
+                        if command is None:
+                            command = claim_command(conn, agent_names, only_kinds=["message"], session_id=turn_session_id)
                     else:
-                        append_event(conn, command["session_id"], "notice", "No turn is running.")
-                    finish_command(conn, command["id"], "done")
-                    continue
-                if command["kind"] == "message":
-                    if busy and command["session_id"] == turn_session_id:
-                        payload = json.loads(command["payload"])
-                        client = sessions.get(turn_session_id)
-                        if client is None:
-                            append_event(conn, command["session_id"], "error", "the running turn's session is not attached")
-                            finish_command(conn, command["id"], "failed")
-                            continue
-                        from mistralai.vibe.harness.app_server import session as harness_session
-
-                        try:
-                            response = await client.send_message(
-                                [harness_session.TextContentBlock(text=payload["text"])]
-                            )
-                        except Exception as exc:
-                            append_event(conn, command["session_id"], "error", str(exc))
-                            finish_command(conn, command["id"], "failed")
-                            continue
-                        if response.steered is not True:
-                            append_event(
-                                conn,
-                                command["session_id"],
-                                "notice",
-                                "The turn had already ended; your message started a new turn whose reply will not appear here.",
-                            )
+                        command = claim_command(conn, agent_names)
+                    if command is None:
+                        await asyncio.sleep(POLL_SECONDS)
+                        continue
+                    if command["kind"] == "cancel":
+                        if busy and command["session_id"] == turn_session_id:
+                            turn_task.cancel()
+                            try:
+                                await turn_task
+                            except asyncio.CancelledError:
+                                pass
+                            turn_task = None
+                            turn_session_id = None
+                        else:
+                            append_event(conn, command["session_id"], "notice", "No turn is running.")
                         finish_command(conn, command["id"], "done")
                         continue
-                    turn_session_id = command["session_id"]
-                    turn_task = asyncio.create_task(handle_command(conn, loaded_by_agent, sessions, command))
-                    continue
-                await handle_command(conn, loaded_by_agent, sessions, command)
+                    if command["kind"] == "message":
+                        if busy and command["session_id"] == turn_session_id:
+                            payload = json.loads(command["payload"])
+                            client = sessions.get(turn_session_id)
+                            if client is None:
+                                append_event(conn, command["session_id"], "error", "the running turn's session is not attached")
+                                finish_command(conn, command["id"], "failed")
+                                continue
+                            from mistralai.vibe.harness.app_server import session as harness_session
+
+                            try:
+                                response = await client.send_message(
+                                    [harness_session.TextContentBlock(text=payload["text"])]
+                                )
+                            except Exception as exc:
+                                append_event(conn, command["session_id"], "error", str(exc))
+                                finish_command(conn, command["id"], "failed")
+                                continue
+                            if response.steered is not True:
+                                append_event(
+                                    conn,
+                                    command["session_id"],
+                                    "notice",
+                                    "The turn had already ended; your message started a new turn whose reply will not appear here.",
+                                )
+                            finish_command(conn, command["id"], "done")
+                            continue
+                        turn_session_id = command["session_id"]
+                        turn_task = asyncio.create_task(handle_command(conn, loaded, sessions, command))
+                        continue
+                    await handle_command(conn, loaded, sessions, command)
+            finally:
+                if turn_task is not None and not turn_task.done():
+                    turn_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await turn_task
+                await _detach_session(conn, sessions, model.current_session_id())
     finally:
-        if turn_task is not None and not turn_task.done():
-            turn_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await turn_task
-        for client in sessions.values():
-            with contextlib.suppress(Exception):
-                await client.close()
+        server.shutdown()
+        server.server_close()
