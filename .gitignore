@@ -13,5 +13,8 @@ wheels/
 .vibe/
 .worktreeinclude
 
+# ADK runtime state
+.adk/
+
 # Environment secrets
 .env

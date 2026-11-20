@@ -6,10 +6,11 @@ from pathlib import Path
 
 BOT_ROOT = Path.home() / ".bots"
 COMMON_CONFIG_PATH = BOT_ROOT / "config.toml"
+WORKSPACE_DIR = BOT_ROOT / "workspace"
 PROFILE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
-def _load_profile() -> str | None:
+def load_profile() -> str | None:
     profile = os.environ.get("BOT_PROFILE", "").strip()
     if not profile:
         return None
@@ -20,9 +21,8 @@ def _load_profile() -> str | None:
     return profile
 
 
-PROFILE = _load_profile()
-BOT_DIR = BOT_ROOT / "profiles" / PROFILE if PROFILE is not None else None
-WORKSPACE_DIR = BOT_ROOT / "workspace"
+def bot_dir(profile: str | None) -> Path | None:
+    return BOT_ROOT / "profiles" / profile if profile is not None else None
 
 
 @dataclass(frozen=True)
@@ -62,10 +62,10 @@ def _check_top_level(data: dict, source: Path) -> dict:
     return data
 
 
-def _load_config() -> dict:
-    if BOT_DIR is None:
+def _load_profile_config(profile_dir: Path | None) -> dict:
+    if profile_dir is None:
         return {}
-    path = BOT_DIR / "config.toml"
+    path = profile_dir / "config.toml"
     try:
         return _check_top_level(_load_toml(path), path)
     except FileNotFoundError:
@@ -92,20 +92,20 @@ def _load_agent_raw(data: dict, source: Path) -> dict | None:
     return raw
 
 
-def _load_agent_config(common: dict | None, profile: dict | None) -> AgentConfig:
+def _load_agent_config(common: dict | None, profile: dict | None, profile_dir: Path | None) -> AgentConfig:
     if profile is not None:
-        raw, source = profile, BOT_DIR / "config.toml"
+        raw, source = profile, profile_dir / "config.toml"
     elif common is not None:
         raw, source = common, COMMON_CONFIG_PATH
     else:
-        if BOT_DIR is not None:
+        if profile_dir is not None:
             raise ValueError(
-                f"No [agent] table in {COMMON_CONFIG_PATH} or {BOT_DIR / 'config.toml'}: "
+                f"No [agent] table in {COMMON_CONFIG_PATH} or {profile_dir / 'config.toml'}: "
                 "configure the model endpoint in one of them"
             )
         raise ValueError(
-            f"BOT_PROFILE is unset and {COMMON_CONFIG_PATH} has no [agent] table: "
-            "configure the model endpoint in the common config or set BOT_PROFILE"
+            f"No profile selected and {COMMON_CONFIG_PATH} has no [agent] table: "
+            "configure the model endpoint in the common config or select a profile"
         )
     missing = [
         field.name
@@ -135,15 +135,25 @@ def _load_mcp_configs(data: dict, source: Path) -> dict[str, McpConfig]:
     return servers
 
 
-_PROFILE_CONFIG_PATH = BOT_DIR / "config.toml" if BOT_DIR is not None else None
-_COMMON = _load_common_config()
-_DATA = _load_config()
-CONFIG = _load_agent_config(
-    _load_agent_raw(_COMMON, COMMON_CONFIG_PATH),
-    _load_agent_raw(_DATA, _PROFILE_CONFIG_PATH) if _PROFILE_CONFIG_PATH is not None else None,
-)
-MCP_SERVERS = {
-    "chrome": McpConfig(url="http://127.0.0.1:8080/mcp"),
-    **_load_mcp_configs(_COMMON, COMMON_CONFIG_PATH),
-    **(_load_mcp_configs(_DATA, _PROFILE_CONFIG_PATH) if _PROFILE_CONFIG_PATH is not None else {}),
-}
+def load_config(profile: str | None = None) -> AgentConfig:
+    profile_dir = bot_dir(profile)
+    common = _load_common_config()
+    data = _load_profile_config(profile_dir)
+    profile_path = profile_dir / "config.toml" if profile_dir is not None else None
+    return _load_agent_config(
+        _load_agent_raw(common, COMMON_CONFIG_PATH),
+        _load_agent_raw(data, profile_path) if profile_path is not None else None,
+        profile_dir,
+    )
+
+
+def load_mcp_servers(profile: str | None = None) -> dict[str, McpConfig]:
+    profile_dir = bot_dir(profile)
+    common = _load_common_config()
+    data = _load_profile_config(profile_dir)
+    profile_path = profile_dir / "config.toml" if profile_dir is not None else None
+    return {
+        "chrome": McpConfig(url="http://127.0.0.1:8080/mcp"),
+        **_load_mcp_configs(common, COMMON_CONFIG_PATH),
+        **(_load_mcp_configs(data, profile_path) if profile_path is not None else {}),
+    }

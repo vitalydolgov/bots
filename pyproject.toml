@@ -5,14 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "local-agents",
-    "mistralai-agents>=1.1.3",
     "python-dotenv>=1.2.4",
     "httpx>=0.28",
+    "google-adk[mcp]",
+    "litellm>=1.84",
 ]
-
-[tool.uv.workspace]
-members = ["local_agents"]
-
-[tool.uv.sources]
-local-agents = { workspace = true }
