@@ -1,7 +1,11 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "bot"
 version = "0.1.0"
-description = "Add your description here"
+description = "A framework for creating specialized bots built on Google ADK"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -9,4 +13,24 @@ dependencies = [
     "httpx>=0.28",
     "google-adk[mcp]",
     "litellm>=1.84",
+]
+
+[project.scripts]
+bots = "bots:main"
+
+[tool.hatch.build.targets.wheel]
+include = [
+    "agent.py",
+    "bots.py",
+    "config.py",
+    "factory.py",
+    "mcp_images.py",
+    "mcp_servers.py",
+    "modalities.py",
+    "roster.py",
+    "skills.py",
+    "sync_agents.py",
+    "tools",
+    "instructions",
+    "scripts",
 ]

@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from config import BOT_ROOT, PROFILE_PATTERN
+from config import PROFILES_DIR, PROFILE_PATTERN
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "instructions" / "prompts"
 
 
 def roster_instructions() -> str:
-    profiles_dir = BOT_ROOT / "profiles"
+    profiles_dir = PROFILES_DIR
     try:
         names = sorted(
             entry.name

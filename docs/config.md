@@ -1,9 +1,9 @@
 # Configuration
 
-The bot reads its configuration from two files at startup:
+The bot reads its configuration from two files at startup. Both live under the bots root, `~/.bots` by default; set the `BOTS_HOME` environment variable to use a different root.
 
-1. `~/.bots/config.toml` — the common config, shared by all profiles.
-2. `~/.bots/profiles/<profile>/config.toml` — the profile config, where `<profile>` is the selected profile (via `BOT_PROFILE`, or the agent picked in the multi-agent UI). Read only when a profile is selected; otherwise only the common config is read.
+1. `<BOTS_HOME>/config.toml` — the common config, shared by all profiles.
+2. `<BOTS_HOME>/profiles/<profile>/config.toml` — the profile config, where `<profile>` is the selected profile (via `BOT_PROFILE`, or the agent picked in the multi-agent UI). Read only when a profile is selected; otherwise only the common config is read.
 
 A profile table replaces the common table of the same name entirely.
 

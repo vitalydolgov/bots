@@ -4,9 +4,12 @@ import tomllib
 from dataclasses import MISSING, dataclass, fields
 from pathlib import Path
 
-BOT_ROOT = Path.home() / ".bots"
+_bots_home = os.environ.get("BOTS_HOME", "").strip()
+BOT_ROOT = Path(_bots_home).expanduser() if _bots_home else Path.home() / ".bots"
 COMMON_CONFIG_PATH = BOT_ROOT / "config.toml"
 WORKSPACE_DIR = BOT_ROOT / "workspace"
+AGENTS_DIR = BOT_ROOT / "agents"
+PROFILES_DIR = BOT_ROOT / "profiles"
 PROFILE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
@@ -22,7 +25,7 @@ def load_profile() -> str | None:
 
 
 def bot_dir(profile: str | None) -> Path | None:
-    return BOT_ROOT / "profiles" / profile if profile is not None else None
+    return PROFILES_DIR / profile if profile is not None else None
 
 
 @dataclass(frozen=True)
