@@ -1,4 +1,5 @@
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -60,9 +61,7 @@ def sync_agents() -> None:
         shim.parent.mkdir(exist_ok=True)
         shim.write_text(content, encoding="utf-8")
     for entry in to_remove:
-        for child in entry.iterdir():
-            child.unlink()
-        entry.rmdir()
+        shutil.rmtree(entry)
 
 
 def main() -> None:
